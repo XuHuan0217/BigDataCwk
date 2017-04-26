@@ -1,0 +1,72 @@
+# ### Connect to keyspace 'csc8101'
+
+# In[3]:
+
+cluster = Cluster()
+session = cluster.connect('csc8101')
+
+
+# ### create table for task1
+# - Design of Visits_per_url
+#  - Query First: the query made on this table is, return pages by given (Topic,Batchtime,Client id), there is an assumption: no rows count equals 0. In this case, the order of key (Topic,Batchtime,Client id) before (page) can satisfiy the requirement. 
+#  - Choice of Partition Key and Cluster Key: There is a trade-off between Partition Key and Cluster Key. Partition Key will seprarte the whole tabale into partitions and each will exisit in one or more nodes, and cluster key will order data in one partition. 
+#    - If there are too many partition key, the hashing for partition key will have too many conflicts. So I do not use combined partiiton key e.g. (topic Batchtime).
+#    - If we use Batchtime as partition key, then all writing or querying in a period of time will all happened in one partition. That can not take advantage of Cassandra distributed system, which not all nodes or partitions are woring together. So I select Topic as partition keys, and others as cluster key.
+# - the table Visit_per_url_tmp only used in generate dummy data. Not used in spark streamming case.
+#  - when generating dummy data, we need to figure out distince users for a given topic and page, so the order of key should be (Topic,batchtime,page) , Clientid. To satisfy this, I duplicate the data in Visits_per_url.
+
+# In[3]:
+
+t1_drop = '''
+    Drop Table IF EXISTS Visits_per_url
+'''
+t1_table = 'CREATE TABLE IF NOT EXISTS Visits_per_url(            Batchtime timestamp,            Clientid varchar,            Topic varchar,            Page varchar,            count int,            PRIMARY KEY(Topic,Batchtime,Clientid,Page)            )'
+session.execute(t1_drop)
+session.execute(t1_table)
+t1_tmp_drop = '''
+    Drop Table IF EXISTS Visits_per_url_tmp
+'''
+t1_tmp_table = 'CREATE TABLE IF NOT EXISTS Visits_per_url_tmp(            Batchtime timestamp,            Clientid varchar,            Topic varchar,            Page varchar,            count int,            PRIMARY KEY(Topic,Batchtime,Page,Clientid)            )'
+session.execute(t1_tmp_drop)
+session.execute(t1_tmp_table)
+
+
+# ### Design of table 2
+# - According to the query requirement, we need get ordered count by given Topic and Batchtime. In this case we need to define Topic and Batchtime as Partition key and count as cluster key for order.
+
+# In[15]:
+
+t2_drop = '''
+    Drop Table IF EXISTS Distinct_user_counts
+'''
+t2_table='''
+            CREATE TABLE IF NOT EXISTS Distinct_user_counts(
+            Batchtime timestamp,
+            Topic varchar,
+            Page varchar,
+            count int,
+            PRIMARY KEY((Topic,Batchtime),count,Page)
+            ) 
+        '''
+#WITH CLUSTERING ORDER BY (insertion_time DESC);
+session.execute(t2_drop)
+session.execute(t2_table)
+
+
+# ### User_Batchtime used for ordering batchtime
+# - In task 3, we need to get the most recently time and the past 3 time period. To implement this in Discinct_user_counts table, we need to use distince count which is not suggested. So I choose to build a addition table which stores clientid as parititon key and batchtime as cluster key.
+
+# In[6]:
+
+t3_drop='''
+    Drop Tabel IF EXISTS User_Batchtime
+'''
+t3_table='''
+        CREATE TABLE IF NOT EXISTS User_Batchtime(
+        Clientid varchar,
+        Batchtime timestamp,
+        PRIMARY KEY(Clientid,Batchtime)
+        )
+'''
+#session.execute(t3_drop)
+session.execute(t3_table)
